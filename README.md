@@ -117,7 +117,7 @@ You need to download the following model files:
 **First Time Setup:**
 ```bash
 # Clone the repository
-git clone [<repository-url>](https://github.com/Arpan2307/grounded-sam2-webapp)
+git clone https://github.com/Arpan2307/grounded-sam2-webapp
 cd grounded-sam2-webapp
 
 # Create virtual environment (one-time only)
