@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="Grounded SAM-2 Video Object Detection and Tracking Web Application" />
+    <title>Grounded SAM-2 Video Tracker</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+          'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background-color: #f5f5f5;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 10px;
+        padding: 40px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 40px;
+      }
+
+      .header h1 {
+        color: #1976d2;
+        margin-bottom: 10px;
+      }
+
+      .steps {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 40px;
+      }
+
+      .step {
+        padding: 10px 20px;
+        margin: 0 10px;
+        border-radius: 5px;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .step.active {
+        background-color: #1976d2;
+        color: white;
+      }
+
+      .step.inactive {
+        background-color: #f5f5f5;
+        color: #666;
+      }
+
+      .upload-area {
+        border: 2px dashed #ccc;
+        border-radius: 10px;
+        padding: 60px 20px;
+        text-align: center;
+        cursor: pointer;
+        transition: border-color 0.3s;
+        margin-bottom: 20px;
+        position: relative;
+        z-index: 10;
+        background-color: white;
+      }
+
+      .upload-area:hover {
+        border-color: #1976d2;
+        background-color: #f8f9ff;
+      }
+
+      .upload-area.dragover {
+        border-color: #1976d2;
+        background-color: #f0f8ff;
+      }
+
+      .prompt-section {
+        max-width: 600px;
+        margin: 0 auto;
+      }
+
+      .input-group {
+        margin-bottom: 20px;
+      }
+
+      .input-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: #333;
+      }
+
+      .input-group input {
+        width: 100%;
+        padding: 15px;
+        font-size: 16px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        box-sizing: border-box;
+      }
+
+      .btn {
+        padding: 15px 30px;
+        font-size: 16px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+      }
+
+      .btn-primary {
+        background-color: #1976d2;
+        color: white;
+      }
+
+      .btn-primary:hover {
+        background-color: #1565c0;
+      }
+
+      .btn-secondary {
+        background-color: #666;
+        color: white;
+      }
+
+      .btn-secondary:hover {
+        background-color: #555;
+      }
+
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .alert {
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 5px;
+      }
+
+      .alert-success {
+        background-color: #e8f5e8;
+        color: #2e7d32;
+        border: 1px solid #c8e6c9;
+      }
+
+      .alert-error {
+        background-color: #ffebee;
+        color: #c62828;
+        border: 1px solid #ffcdd2;
+      }
+
+      .alert-info {
+        background-color: #e3f2fd;
+        color: #1976d2;
+        border: 1px solid #bbdefb;
+      }
+
+      .progress-section {
+        text-align: center;
+        margin: 40px 0;
+      }
+
+      .progress-bar {
+        width: 100%;
+        max-width: 400px;
+        height: 20px;
+        background-color: #f0f0f0;
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 20px auto;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background-color: #1976d2;
+        transition: width 0.3s ease;
+        border-radius: 10px;
+      }
+
+      .video-section {
+        text-align: center;
+        margin: 20px 0;
+      }
+
+      .video-section video {
+        width: 100%;
+        max-width: 800px;
+        height: auto;
+        border-radius: 10px;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .emoji {
+        font-size: 48px;
+        margin-bottom: 15px;
+      }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎥 Grounded SAM-2 Video Tracker</h1>
+            <p>Upload a video, describe the object you want to track, and get an annotated video with object tracking</p>
+        </div>
+
+        <!-- Progress Steps -->
+        <div class="steps">
+            <div class="step" id="step-0">📁 Upload Video</div>
+            <div class="step" id="step-1">🎯 Set Detection Prompt</div>
+            <div class="step" id="step-2">⚙️ Process Video</div>
+            <div class="step" id="step-3">📥 Download Result</div>
+        </div>
+
+        <!-- Error/Success Messages -->
+        <div id="alert-container"></div>
+
+        <!-- Step 0: File Upload -->
+        <div id="upload-step" class="step-content">
+            <div class="upload-area" id="upload-area">
+                <div class="emoji">📁</div>
+                <h3>Drop your video file here or click to browse</h3>
+                <p>Supported formats: MP4, AVI, MOV, MKV, WEBM (Max: 100MB)</p>
+                <input type="file" id="file-input" accept="video/*" style="display: none;">
+            </div>
+            
+            <!-- Debug button for testing -->
+            <div style="text-align: center; margin-top: 20px;">
+                <button onclick="console.log('Test button clicked'); document.getElementById('file-input').click();" 
+                        style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px;">
+                    Test Upload Button
+                </button>
+            </div>
+        </div>
+
+        <!-- Step 1: Prompt Input -->
+        <div id="prompt-step" class="step-content hidden">
+            <div class="prompt-section">
+                <h3>Describe the object you want to track:</h3>
+                <div class="input-group">
+                    <label for="text-prompt">Detection Prompt</label>
+                    <input type="text" id="text-prompt" placeholder="e.g., cat, person, car, dog" value="cat">
+                </div>
+                <button class="btn btn-primary" id="start-tracking-btn" onclick="startTracking()">
+                    Start Tracking
+                </button>
+            </div>
+        </div>
+
+        <!-- Step 2: Processing -->
+        <div id="processing-step" class="step-content hidden">
+            <div class="progress-section">
+                <h3>Processing Video...</h3>
+                <div class="emoji">⚙️</div>
+                <div id="progress-message">Initializing...</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+                </div>
+                <div id="progress-text">0% completed</div>
+            </div>
+        </div>
+
+        <!-- Step 3: Results -->
+        <div id="results-step" class="step-content hidden">
+            <h3>🎉 Processing Complete!</h3>
+            <div class="video-section">
+                <video id="result-video" controls style="display: none;">
+                    Your browser does not support the video tag.
+                </video>
+            </div>
+            <div style="text-align: center; margin-top: 20px;">
+                <a class="btn btn-primary" id="download-btn" style="text-decoration: none; margin-right: 10px;">
+                    📥 Download Video
+                </a>
+                <button class="btn btn-secondary" onclick="resetApp()">
+                    🔄 Process Another Video
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        console.log('Script loaded successfully');
+        
+        let currentStep = 0;
+        let fileId = null;
+        let fileName = '';
+        let taskId = null;
+        let pollInterval = null;
+
+        // API base URL
+        const API_BASE = window.location.protocol + '//' + window.location.hostname + ':5000';
+        console.log('API_BASE set to:', API_BASE);
+
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, initializing app');
+            setupEventListeners();
+            updateStepDisplay();
+        });
+
+        function setupEventListeners() {
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('file-input');
+
+            console.log('Setting up event listeners');
+            console.log('Upload area:', uploadArea);
+            console.log('File input:', fileInput);
+
+            // File upload events
+            uploadArea.addEventListener('click', (e) => {
+                console.log('Upload area clicked');
+                fileInput.click();
+            });
+            uploadArea.addEventListener('dragover', handleDragOver);
+            uploadArea.addEventListener('dragleave', handleDragLeave);
+            uploadArea.addEventListener('drop', handleDrop);
+            fileInput.addEventListener('change', handleFileSelect);
+
+            // Enter key for prompt input
+            document.getElementById('text-prompt').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    startTracking();
+                }
+            });
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('dragover');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileUpload(files[0]);
+            }
+        }
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                handleFileUpload(file);
+            }
+        }
+
+        async function handleFileUpload(file) {
+            try {
+                console.log('Starting file upload:', file.name, 'Size:', file.size);
+                showAlert('Uploading file...', 'info');
+                
+                const formData = new FormData();
+                formData.append('file', file);
+
+                console.log('API URL:', `${API_BASE}/api/upload`);
+                const response = await fetch(`${API_BASE}/api/upload`, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error('Upload error:', errorData);
+                    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                console.log('Upload success:', data);
+                fileId = data.file_id;
+                fileName = data.filename || file.name;
+                
+                console.log('File ID set to:', fileId);
+                showAlert(`Video "${fileName}" uploaded successfully!`, 'success');
+                nextStep();
+            } catch (error) {
+                console.error('Upload failed:', error);
+                showAlert(`Upload failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function startTracking() {
+            const textPrompt = document.getElementById('text-prompt').value.trim();
+            
+            if (!fileId || !textPrompt) {
+                showAlert('Please upload a video and enter a detection prompt', 'error');
+                return;
+            }
+
+            try {
+                showAlert('Starting tracking task...', 'info');
+                nextStep();
+
+                const formData = new FormData();
+                formData.append('file_id', fileId);
+                formData.append('text_prompt', textPrompt);
+                formData.append('prompt_type', 'box');
+                formData.append('box_threshold', '0.35');
+                formData.append('text_threshold', '0.25');
+
+                const response = await fetch(`${API_BASE}/api/track`, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                taskId = data.task_id;
+                
+                // Start polling for updates
+                startPolling();
+            } catch (error) {
+                showAlert(`Failed to start tracking: ${error.message}`, 'error');
+                currentStep = 1;
+                updateStepDisplay();
+            }
+        }
+
+        function startPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+
+            pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/api/status/${taskId}`);
+                    if (response.ok) {
+                        const task = await response.json();
+                        updateProgress(task);
+
+                        if (task.status === 'completed') {
+                            clearInterval(pollInterval);
+                            showResults();
+                        } else if (task.status === 'failed') {
+                            clearInterval(pollInterval);
+                            showAlert(task.error || 'Processing failed', 'error');
+                            resetApp();
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch task status:', error);
+                }
+            }, 2000);
+
+            // Clean up after 10 minutes
+            setTimeout(() => {
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                }
+            }, 600000);
+        }
+
+        function updateProgress(task) {
+            const progressFill = document.getElementById('progress-fill');
+            const progressText = document.getElementById('progress-text');
+            const progressMessage = document.getElementById('progress-message');
+
+            const progress = task.progress || 0;
+            progressFill.style.width = `${progress}%`;
+            progressText.textContent = `${Math.round(progress)}% completed`;
+            
+            if (task.message) {
+                progressMessage.textContent = task.message;
+            }
+        }
+
+        function showResults() {
+            const resultVideo = document.getElementById('result-video');
+            const downloadBtn = document.getElementById('download-btn');
+
+            resultVideo.src = `${API_BASE}/api/download/${taskId}`;
+            resultVideo.style.display = 'block';
+            downloadBtn.href = `${API_BASE}/api/download/${taskId}`;
+            downloadBtn.download = `tracked_video_${taskId}.mp4`;
+
+            showAlert('Video processing completed successfully!', 'success');
+            nextStep();
+        }
+
+        function nextStep() {
+            console.log('nextStep called, current step:', currentStep);
+            if (currentStep < 3) {
+                currentStep++;
+                console.log('Moving to step:', currentStep);
+                updateStepDisplay();
+            }
+        }
+
+        function updateStepDisplay() {
+            console.log('updateStepDisplay called, current step:', currentStep);
+            // Update step indicators
+            for (let i = 0; i <= 3; i++) {
+                const stepEl = document.getElementById(`step-${i}`);
+                if (stepEl) {
+                    if (i <= currentStep) {
+                        stepEl.className = 'step active';
+                    } else {
+                        stepEl.className = 'step inactive';
+                    }
+                } else {
+                    console.error('Step element not found:', `step-${i}`);
+                }
+            }
+
+            // Show/hide step content
+            const stepContents = document.querySelectorAll('.step-content');
+            console.log('Found step contents:', stepContents.length);
+            stepContents.forEach((el, index) => {
+                console.log(`Step ${index}: ${index === currentStep ? 'showing' : 'hiding'}`);
+                if (index === currentStep) {
+                    el.classList.remove('hidden');
+                } else {
+                    el.classList.add('hidden');
+                }
+            });
+        }
+
+        function showAlert(message, type) {
+            const container = document.getElementById('alert-container');
+            const alertClass = type === 'error' ? 'alert-error' : 
+                              type === 'success' ? 'alert-success' : 'alert-info';
+            
+            container.innerHTML = `<div class="alert ${alertClass}">${message}</div>`;
+            
+            // Auto-remove after 5 seconds for info messages
+            if (type === 'info') {
+                setTimeout(() => {
+                    container.innerHTML = '';
+                }, 5000);
+            }
+        }
+
+        function resetApp() {
+            currentStep = 0;
+            fileId = null;
+            fileName = '';
+            taskId = null;
+            
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
+            
+            document.getElementById('file-input').value = '';
+            document.getElementById('text-prompt').value = 'cat';
+            document.getElementById('alert-container').innerHTML = '';
+            document.getElementById('result-video').style.display = 'none';
+            
+            updateStepDisplay();
+        }
+    </script>
+</body>
+</html>

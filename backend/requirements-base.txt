@@ -1,0 +1,21 @@
+# Basic dependencies that should install without issues
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+python-multipart>=0.0.5
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+aiofiles>=23.0.0
+websockets>=11.0.0
+
+# Computer vision and utilities
+opencv-python>=4.5.0
+numpy>=1.21.0
+pillow>=9.0.0
+tqdm>=4.60.0
+
+# Task queue and caching
+redis>=4.0.0
+
+# Additional utilities
+scipy>=1.9.0
+matplotlib>=3.5.0

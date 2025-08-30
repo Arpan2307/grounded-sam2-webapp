@@ -1,0 +1,81 @@
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# Model checkpoints (large files)
+backend/checkpoints/*.pt
+backend/checkpoints/*.pth
+backend/gdino_checkpoints/*.pth
+checkpoints/
+gdino_checkpoints/
+
+# Temporary files
+backend/uploads/
+backend/outputs/
+backend/temp/
+uploads/
+outputs/
+temp/
+temp_frames/
+tracking_results/
+
+# Dependencies (will be auto-cloned)
+segment-anything-2/
+GroundingDINO/
+Grounded-SAM-2/
+grounded_dino/
+sam2/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+*.log
+
+# Node modules (React frontend)
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Redis dump files
+dump.rdb
+
+# Docker
+.docker/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Cloned repositories
+segment-anything-2/
+*/grounded_dino/

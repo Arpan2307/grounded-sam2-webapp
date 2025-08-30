@@ -1,0 +1,13 @@
+# Minimal requirements for basic functionality
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+python-multipart>=0.0.6
+aiofiles>=23.0.0
+python-dotenv>=1.0.0
+redis>=5.0.0
+pydantic>=2.0.0
+
+# Optional: Install these separately if needed
+# torch>=2.0.0 --index-url https://download.pytorch.org/whl/cu118
+# torchvision>=0.15.0 --index-url https://download.pytorch.org/whl/cu118
+# opencv-python>=4.8.0
