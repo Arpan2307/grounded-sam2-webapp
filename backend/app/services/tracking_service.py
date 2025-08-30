@@ -15,13 +15,18 @@ import logging
 from celery import Celery
 
 # Add SAM2 and Grounding DINO to Python path
-grounded_sam2_path = "/home/arpan/CourseWork/RoboProject/Grounded-SAM-2"
-grounding_dino_path = "/home/arpan/CourseWork/RoboProject/Grounded-SAM-2/grounding_dino"
+project_root = Path(__file__).parent.parent.parent.parent  # Get to grounded-sam2-webapp root
+grounded_sam2_path = str(project_root / "Grounded-SAM-2")
+segment_anything_2_path = str(project_root / "segment-anything-2")
+grounding_dino_path = str(project_root / "Grounded-SAM-2" / "grounding_dino")
 
-if grounded_sam2_path not in sys.path:
-    sys.path.append(grounded_sam2_path)
-if grounding_dino_path not in sys.path:
-    sys.path.append(grounding_dino_path)
+# Add to Python path in correct order
+for path in [grounded_sam2_path, segment_anything_2_path, grounding_dino_path]:
+    if path not in sys.path:
+        sys.path.insert(0, path)  # Insert at beginning for priority
+
+# Log the python path for debugging
+logging.info(f"Python path (first 3): {sys.path[:3]}")
 
 from app.config import Config
 from app.models.schemas import TaskStatus, TrackingTask, DetectionResult
@@ -66,55 +71,31 @@ class TrackingService:
                 device=self.config.DEVICE
             )
             
-            # Load SAM2 models with CPU fallback for missing CUDA extensions
-            try:
-                self.video_predictor = build_sam2_video_predictor(
-                    self.config.MODEL_CFG, 
-                    self.config.SAM2_CHECKPOINT
-                )
-                self.sam2_image_model = build_sam2(
-                    self.config.MODEL_CFG, 
-                    self.config.SAM2_CHECKPOINT
-                )
-                self.image_predictor = SAM2ImagePredictor(self.sam2_image_model)
-            except Exception as e:
-                logging.warning(f"Failed to load SAM2 with default settings: {e}")
-                logging.info("Attempting to load SAM2 with CPU-only mode...")
-                
-                # Force CPU mode and disable optimizations
-                original_device = self.config.DEVICE
-                self.config.DEVICE = "cpu"
-                
-                # Disable CUDA extensions that cause _C errors
-                os.environ['CUDA_VISIBLE_DEVICES'] = ''
-                
-                self.video_predictor = build_sam2_video_predictor(
-                    self.config.MODEL_CFG, 
-                    self.config.SAM2_CHECKPOINT,
-                    device="cpu"
-                )
-                self.sam2_image_model = build_sam2(
-                    self.config.MODEL_CFG, 
-                    self.config.SAM2_CHECKPOINT,
-                    device="cpu"  
-                )
-                self.image_predictor = SAM2ImagePredictor(self.sam2_image_model)
-                
-                logging.info(f"SAM2 loaded successfully in CPU mode")
-                
-                # Reset device for other components
-                self.config.DEVICE = original_device
+            # Load SAM2 models with our _C patches providing fallbacks
+            self.video_predictor = build_sam2_video_predictor(
+                self.config.MODEL_CFG, 
+                self.config.SAM2_CHECKPOINT,
+                device=self.config.DEVICE
+            )
+            self.sam2_image_model = build_sam2(
+                self.config.MODEL_CFG, 
+                self.config.SAM2_CHECKPOINT,
+                device=self.config.DEVICE
+            )
+            self.image_predictor = SAM2ImagePredictor(self.sam2_image_model)
             
-            # Enable optimizations for newer GPUs
+            # Enable optimizations for newer GPUs if available
             if torch.cuda.is_available() and torch.cuda.get_device_properties(0).major >= 8:
                 torch.backends.cuda.matmul.allow_tf32 = True
                 torch.backends.cudnn.allow_tf32 = True
             
             self.models_loaded = True
-            logging.info("Models loaded successfully")
+            logging.info(f"Models loaded successfully on {self.config.DEVICE}")
             
         except Exception as e:
             logging.error(f"Failed to load models: {e}")
+            import traceback
+            traceback.print_exc()
             self.models_loaded = False
     
     def get_task_status(self, task_id: str) -> Optional[TrackingTask]:
@@ -181,15 +162,19 @@ class TrackingService:
             self.update_task_status(task_id, TaskStatus.PROCESSING, progress=20, 
                                   message="Initializing video predictor...")
             
+            logging.info(f"About to initialize video predictor for {frames_dir}")
             inference_state = self.video_predictor.init_state(video_path=frames_dir)
+            logging.info(f"Video predictor initialized successfully")
             
             # Step 3: Process first frame for object detection
             self.update_task_status(task_id, TaskStatus.PROCESSING, progress=30, 
                                   message="Detecting objects in first frame...")
             
+            logging.info(f"About to detect objects in first frame")
             detections = self._detect_objects_in_frame(
                 frames_dir, frame_names[0], text_prompt, box_threshold, text_threshold
             )
+            logging.info(f"Object detection completed, found {len(detections)} objects")
             
             if not detections:
                 raise Exception(f"No objects detected with prompt: {text_prompt}")
@@ -198,13 +183,17 @@ class TrackingService:
             self.update_task_status(task_id, TaskStatus.PROCESSING, progress=40, 
                                   message="Setting up object tracking...")
             
+            logging.info(f"About to setup video tracking for {len(detections)} objects")
             self._setup_video_tracking(inference_state, detections, 0)
+            logging.info(f"Video tracking setup completed")
             
             # Step 5: Propagate tracking across all frames
             self.update_task_status(task_id, TaskStatus.PROCESSING, progress=50, 
                                   message="Tracking objects across video...")
             
+            logging.info(f"About to propagate tracking across {len(frame_names)} frames")
             video_segments = self._propagate_tracking(inference_state)
+            logging.info(f"Tracking propagation completed")
             
             # Step 6: Create annotated video
             self.update_task_status(task_id, TaskStatus.PROCESSING, progress=70, 
@@ -223,7 +212,9 @@ class TrackingService:
             # self.file_handler.cleanup_temp_files(task_id)
             
         except Exception as e:
-            logging.error(f"Error processing video for task {task_id}: {e}")
+            logging.error(f"Error processing video for task {task_id}: {str(e)}")
+            import traceback
+            logging.error(f"Full traceback: {traceback.format_exc()}")
             self.update_task_status(task_id, TaskStatus.FAILED, error=str(e))
     
     def _extract_video_frames(self, video_path: str, frames_dir: str) -> List[str]:

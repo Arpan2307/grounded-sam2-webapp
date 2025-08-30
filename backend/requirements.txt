@@ -21,3 +21,6 @@ opencv-contrib-python>=4.8.0
 pycocotools
 matplotlib
 scipy
+einops
+yapf
+requests

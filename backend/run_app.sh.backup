@@ -1,0 +1,412 @@
+#!/bin/bash
+
+echo "🚀 Starting Grounded SAM-2 Web Application..."
+echo "============================================="
+
+# Check if we're in the correct directory
+if [ ! -f "app/main.py" ]; then
+    echo "❌ Error: Please run this script from the backend directory"
+    echo "   cd /path/to/grounded-sam2-webapp/backend"
+    exit 1
+fi
+
+# Activate virtual environment
+if [ -z "$VIRTUAL_ENV" ]; then
+    echo "⚠️  Virtual environment not detected. Activating..."
+    if [ -d "venv" ]; then
+        # Check if the virtual environment is valid
+        if [ ! -f "venv/bin/python" ] || [ ! -f "venv/pyvenv.cfg" ]; then
+            echo "🔧 Virtual environment appears corrupted, recreating..."
+            rm -rf venv
+            python3 -m venv venv
+        fi
+        
+        # Source the activation script
+        . venv/bin/activate
+        
+        # Verify activation worked
+        if [ -n "$VIRTUAL_ENV" ]; then
+            echo "✅ Virtual environment activated ($(which python))"
+        else
+            echo "⚠️  Virtual environment activation may have failed"
+            # Force use the venv python directly
+            export PATH="$(pwd)/venv/bin:$PATH"
+            echo "✅ Using virtual environment Python: $(which python)"
+        fi
+    else
+        echo "❌ Virtual environment not found. Creating one..."
+        python3 -m venv venv
+        . venv/bin/activate
+        echo "✅ Virtual environment created and activated"
+    fi
+else
+    echo "✅ Virtual environment already active ($(which python))"
+fi
+
+# Ensure we're using the right Python and pip
+PYTHON_CMD="$(pwd)/venv/bin/python"
+PIP_CMD="$(pwd)/venv/bin/pip"
+
+# Fallback to system commands if venv binaries don't exist
+if [ ! -f "$PYTHON_CMD" ] || [ ! -x "$PYTHON_CMD" ]; then
+    echo "⚠️  Virtual environment Python not found or not executable, using system Python"
+    PYTHON_CMD="python"
+fi
+
+if [ ! -f "$PIP_CMD" ] || [ ! -x "$PIP_CMD" ]; then
+    echo "⚠️  Virtual environment pip not found or not executable, using Python -m pip"
+    PIP_CMD="$PYTHON_CMD -m pip"
+fi
+
+echo "🔍 Using Python: $PYTHON_CMD"
+echo "🔍 Using pip: $PIP_CMD"
+
+# Check if models are downloaded
+echo "🔍 Checking model files..."
+if [ ! -f "checkpoints/sam2.1_hiera_large.pt" ]; then
+    echo "❌ SAM-2 model not found. Please run: ./download_models.sh"
+    exit 1
+else
+    echo "✅ SAM-2 model found"
+fi
+
+if [ ! -f "gdino_checkpoints/groundingdino_swint_ogc.pth" ]; then
+    echo "❌ Grounding DINO model not found. Please run: ./download_models.sh"
+    exit 1
+else
+    echo "✅ Grounding DINO model found"
+fi
+
+# Install/update dependencies
+echo "📦 Installing Python dependencies..."
+
+# First install basic requirements
+echo "   Installing basic dependencies..."
+$PIP_CMD install --upgrade pip setuptools wheel --quiet
+$PIP_CMD install fastapi "uvicorn[standard]" python-multipart aiofiles redis python-dotenv requests --quiet
+
+# Install PyTorch with CUDA support
+echo "   Installing PyTorch with CUDA support..."
+$PIP_CMD install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 --quiet
+
+# Install computer vision and ML dependencies
+echo "   Installing computer vision dependencies..."
+$PIP_CMD install opencv-python pillow numpy matplotlib tqdm supervision --quiet
+
+# Install additional requirements if file exists
+if [ -f "requirements.txt" ]; then
+    echo "   Installing from requirements.txt..."
+    $PIP_CMD install -r requirements.txt --quiet
+elif [ -f "requirements-minimal.txt" ]; then
+    echo "   Installing from requirements-minimal.txt..."
+    $PIP_CMD install -r requirements-minimal.txt --quiet
+fi
+
+# Install additional packages that might be missing
+echo "   Installing additional packages..."
+$PIP_CMD install transformers timm addict yapf --quiet
+
+echo "✅ Dependencies installation completed"
+
+# Verify critical dependencies are installed
+echo "🔍 Verifying critical dependencies..."
+$PYTHON_CMD -c "import fastapi, uvicorn; print('✅ FastAPI and Uvicorn are available')" 2>/dev/null || {
+    echo "⚠️  FastAPI/Uvicorn not properly installed. Retrying..."
+    $PIP_CMD install --force-reinstall fastapi "uvicorn[standard]" --quiet
+}
+
+# Clone and setup required repositories
+echo "🔄 Setting up required repositories..."
+
+# Get the project root directory (one level up from backend)
+PROJECT_ROOT=$(dirname $(pwd))
+
+# Clone Grounded-SAM-2 if it doesn't exist
+if [ ! -d "$PROJECT_ROOT/Grounded-SAM-2" ]; then
+    echo "   Cloning Grounded-SAM-2 repository..."
+    cd "$PROJECT_ROOT"
+    git clone https://github.com/IDEA-Research/Grounded-SAM-2.git
+    cd backend
+    echo "   ✅ Grounded-SAM-2 cloned"
+else
+    echo "   ✅ Grounded-SAM-2 already exists"
+fi
+
+# Clone SAM-2 separately if needed
+if [ ! -d "$PROJECT_ROOT/segment-anything-2" ]; then
+    echo "   Cloning SAM-2 repository..."
+    cd "$PROJECT_ROOT"
+    git clone https://github.com/facebookresearch/segment-anything-2.git
+    cd backend
+    echo "   ✅ SAM-2 cloned"
+else
+    echo "   ✅ SAM-2 already exists"
+fi
+
+# Install SAM-2 package
+if [ -d "$PROJECT_ROOT/segment-anything-2" ]; then
+    echo "   Installing SAM-2 package..."
+    cd "$PROJECT_ROOT/segment-anything-2"
+    $PIP_CMD install -e . --quiet
+    cd "$PROJECT_ROOT/backend"
+    echo "   ✅ SAM-2 package installed"
+fi
+
+# Install GroundingDINO dependencies
+echo "   Installing GroundingDINO dependencies..."
+if [ -d "$PROJECT_ROOT/Grounded-SAM-2/grounding_dino" ]; then
+    cd "$PROJECT_ROOT/Grounded-SAM-2/grounding_dino"
+    $PIP_CMD install -e . --quiet
+    cd "$PROJECT_ROOT/backend"
+    echo "   ✅ GroundingDINO installed"
+fi
+
+echo "✅ Repository setup completed"
+
+# Apply necessary patches to fix _C errors and CUDA device issues
+echo "🔧 Applying patches to SAM2 repositories..."
+
+# Patch 1: Fix get_connected_components in Grounded-SAM-2
+GROUNDED_SAM2_MISC="$PROJECT_ROOT/Grounded-SAM-2/sam2/utils/misc.py"
+if [ -f "$GROUNDED_SAM2_MISC" ]; then
+    echo "   Patching Grounded-SAM-2 misc.py..."
+    
+    # Backup original if not already backed up
+    if [ ! -f "${GROUNDED_SAM2_MISC}.original" ]; then
+        cp "$GROUNDED_SAM2_MISC" "${GROUNDED_SAM2_MISC}.original"
+    fi
+    
+    # Apply get_connected_components patch
+    python3 -c "
+import re
+
+# Read the file
+with open('$GROUNDED_SAM2_MISC', 'r') as f:
+    content = f.read()
+
+# Patch get_connected_components function
+old_func = '''def get_connected_components(mask):
+    \"\"\"
+    Get the connected components (8-connectivity) of binary masks of shape (N, 1, H, W).
+
+    Inputs:
+    - mask: A binary mask tensor of shape (N, 1, H, W), where 1 is foreground and 0 is
+            background.
+
+    Outputs:
+    - labels: A tensor of shape (N, 1, H, W) containing the connected component labels
+              for foreground pixels and 0 for background pixels.
+    - counts: A tensor of shape (N, 1, H, W) containing the area of the connected
+              components for foreground pixels and 0 for background pixels.
+    \"\"\"
+    from sam2 import _C
+
+    return _C.get_connected_componnets(mask.to(torch.uint8).contiguous())'''
+
+new_func = '''def get_connected_components(mask):
+    \"\"\"
+    Get the connected components (8-connectivity) of binary masks of shape (N, 1, H, W).
+    Falls back to OpenCV if custom C++ ops are not available.
+
+    Inputs:
+    - mask: A binary mask tensor of shape (N, 1, H, W), where 1 is foreground and 0 is
+            background.
+
+    Outputs:
+    - labels: A tensor of shape (N, 1, H, W) containing the connected component labels
+              for foreground pixels and 0 for background pixels.
+    - counts: A tensor of shape (N, 1, H, W) containing the area of the connected
+              components for foreground pixels and 0 for background pixels.
+    \"\"\"
+    try:
+        from sam2 import _C
+        return _C.get_connected_componnets(mask.to(torch.uint8).contiguous())
+    except (ImportError, NameError, AttributeError) as e:
+        # Fallback to OpenCV implementation
+        import cv2
+        import torch
+        
+        mask_np = mask.cpu().numpy().astype(np.uint8)
+        B, _, H, W = mask.shape
+        
+        labels_list = []
+        counts_list = []
+        
+        for b in range(B):
+            mask_single = mask_np[b, 0]
+            num_labels, labels_single = cv2.connectedComponents(mask_single, connectivity=8)
+            
+            # Convert back to torch tensor
+            labels_single = torch.from_numpy(labels_single).unsqueeze(0).unsqueeze(0)
+            
+            # Calculate areas for each component
+            counts_single = torch.zeros_like(labels_single, dtype=torch.int32)
+            for label_id in range(1, num_labels):
+                area = (labels_single == label_id).sum()
+                counts_single[labels_single == label_id] = area
+            
+            labels_list.append(labels_single)
+            counts_list.append(counts_single)
+        
+        labels = torch.cat(labels_list, dim=0).to(mask.device)
+        counts = torch.cat(counts_list, dim=0).to(mask.device)
+        
+        return labels, counts'''
+
+# Apply the patch
+if old_func in content:
+    content = content.replace(old_func, new_func)
+    
+    # Also patch get_sdpa_settings to handle CUDA device errors
+    old_sdpa = '''def get_sdpa_settings():
+    if torch.cuda.is_available():
+        old_gpu = torch.cuda.get_device_properties(0).major < 7
+        # only use Flash Attention on Ampere (8.0) or newer GPUs
+        use_flash_attn = torch.cuda.get_device_properties(0).major >= 8'''
+        
+    new_sdpa = '''def get_sdpa_settings():
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        try:
+            old_gpu = torch.cuda.get_device_properties(0).major < 7
+            # only use Flash Attention on Ampere (8.0) or newer GPUs
+            use_flash_attn = torch.cuda.get_device_properties(0).major >= 8
+        except (RuntimeError, AttributeError):
+            # Handle CUDA device errors gracefully
+            old_gpu = True
+            use_flash_attn = False
+    elif torch.cuda.is_available():
+        old_gpu = torch.cuda.get_device_properties(0).major < 7
+        # only use Flash Attention on Ampere (8.0) or newer GPUs
+        use_flash_attn = torch.cuda.get_device_properties(0).major >= 8'''
+    
+    if old_sdpa in content:
+        content = content.replace(old_sdpa, new_sdpa)
+    
+    # Write the patched content
+    with open('$GROUNDED_SAM2_MISC', 'w') as f:
+        f.write(content)
+    
+    echo "   ✅ Grounded-SAM-2 misc.py patched"
+else
+    echo "   ⚠️  get_connected_components function not found or already patched"
+fi
+
+# Patch 2: Fix get_connected_components in segment-anything-2
+SAM2_MISC="$PROJECT_ROOT/segment-anything-2/sam2/utils/misc.py"
+if [ -f "$SAM2_MISC" ]; then
+    echo "   Patching segment-anything-2 misc.py..."
+    
+    # Backup original if not already backed up
+    if [ ! -f "${SAM2_MISC}.original" ]; then
+        cp "$SAM2_MISC" "${SAM2_MISC}.original"
+    fi
+    
+    # Apply the same patches
+    python3 -c "
+import re
+
+# Read the file
+with open('$SAM2_MISC', 'r') as f:
+    content = f.read()
+
+# Patch get_connected_components function
+old_func = '''def get_connected_components(mask):
+    \"\"\"
+    Get the connected components (8-connectivity) of binary masks of shape (N, 1, H, W).
+
+    Inputs:
+    - mask: A binary mask tensor of shape (N, 1, H, W), where 1 is foreground and 0 is
+            background.
+
+    Outputs:
+    - labels: A tensor of shape (N, 1, H, W) containing the connected component labels
+              for foreground pixels and 0 for background pixels.
+    - counts: A tensor of shape (N, 1, H, W) containing the area of the connected
+              components for foreground pixels and 0 for background pixels.
+    \"\"\"
+    from sam2 import _C
+
+    return _C.get_connected_componnets(mask.to(torch.uint8).contiguous())'''
+
+new_func = '''def get_connected_components(mask):
+    \"\"\"
+    Get the connected components (8-connectivity) of binary masks of shape (N, 1, H, W).
+    Falls back to OpenCV if custom C++ ops are not available.
+
+    Inputs:
+    - mask: A binary mask tensor of shape (N, 1, H, W), where 1 is foreground and 0 is
+            background.
+
+    Outputs:
+    - labels: A tensor of shape (N, 1, H, W) containing the connected component labels
+              for foreground pixels and 0 for background pixels.
+    - counts: A tensor of shape (N, 1, H, W) containing the area of the connected
+              components for foreground pixels and 0 for background pixels.
+    \"\"\"
+    try:
+        from sam2 import _C
+        return _C.get_connected_componnets(mask.to(torch.uint8).contiguous())
+    except (ImportError, NameError, AttributeError) as e:
+        # Fallback to OpenCV implementation
+        import cv2
+        import torch
+        import numpy as np
+        
+        mask_np = mask.cpu().numpy().astype(np.uint8)
+        B, _, H, W = mask.shape
+        
+        labels_list = []
+        counts_list = []
+        
+        for b in range(B):
+            mask_single = mask_np[b, 0]
+            num_labels, labels_single = cv2.connectedComponents(mask_single, connectivity=8)
+            
+            # Convert back to torch tensor
+            labels_single = torch.from_numpy(labels_single).unsqueeze(0).unsqueeze(0)
+            
+            # Calculate areas for each component
+            counts_single = torch.zeros_like(labels_single, dtype=torch.int32)
+            for label_id in range(1, num_labels):
+                area = (labels_single == label_id).sum()
+                counts_single[labels_single == label_id] = area
+            
+            labels_list.append(labels_single)
+            counts_list.append(counts_single)
+        
+        labels = torch.cat(labels_list, dim=0).to(mask.device)
+        counts = torch.cat(counts_list, dim=0).to(mask.device)
+        
+        return labels, counts'''
+
+# Apply the patch
+if old_func in content:
+    content = content.replace(old_func, new_func)
+    
+    # Also patch get_sdpa_settings to handle CUDA device errors
+    old_sdpa = '''def get_sdpa_settings():
+    if torch.cuda.is_available():
+        old_gpu = torch.cuda.get_device_properties(0).major < 7
+        # only use Flash Attention on Ampere (8.0) or newer GPUs
+        use_flash_attn = torch.cuda.get_device_properties(0).major >= 8'''
+        
+    new_sdpa = '''def get_sdpa_settings():
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        try:
+            old_gpu = torch.cuda.get_device_properties(0).major < 7
+            # only use Flash Attention on Ampere (8.0) or newer GPUs
+            use_flash_attn = torch.cuda.get_device_properties(0).major >= 8
+        except (RuntimeError, AttributeError):
+            # Handle CUDA device errors gracefully
+            old_gpu = True
+            use_flash_attn = False
+    elif torch.cuda.is_available():
+        old_gpu = torch.cuda.get_device_properties(0).major < 7
+        # only use Flash Attention on Ampere (8.0) or newer GPUs
+        use_flash_attn = torch.cuda.get_device_properties(0).major >= 8'''
+    
+    if old_sdpa in content:
+        content = content.replace(old_sdpa, new_sdpa)
+    
+    # Write the patched content
+    with open('$SAM2_MISC', 'w')

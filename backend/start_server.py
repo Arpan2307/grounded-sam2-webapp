@@ -10,14 +10,16 @@ logger = logging.getLogger(__name__)
 
 def setup_python_path():
     """Add required paths to Python path"""
-    grounded_sam2_path = "/home/arpan/CourseWork/RoboProject/Grounded-SAM-2"
-    grounding_dino_path = "/home/arpan/CourseWork/RoboProject/Grounded-SAM-2/grounding_dino"
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Get to grounded-sam2-webapp root
+    grounded_sam2_path = os.path.join(project_root, "Grounded-SAM-2")
+    segment_anything_2_path = os.path.join(project_root, "segment-anything-2")
+    grounding_dino_path = os.path.join(project_root, "Grounded-SAM-2", "grounding_dino")
     
-    paths_to_add = [grounded_sam2_path, grounding_dino_path]
+    paths_to_add = [grounded_sam2_path, segment_anything_2_path, grounding_dino_path]
     
     for path in paths_to_add:
         if os.path.exists(path) and path not in sys.path:
-            sys.path.append(path)
+            sys.path.insert(0, path)  # Insert at beginning for priority
             logger.info(f"Added {path} to Python path")
     
     # Also set environment variable
