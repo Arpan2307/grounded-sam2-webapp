@@ -122,6 +122,27 @@ safe_pip_install() {
     return 1
 }
 
+# --- Download required model checkpoints if missing ---
+# Create directories if they don't exist
+mkdir -p "$BACKEND_DIR/checkpoints"
+mkdir -p "$BACKEND_DIR/gdino_checkpoints"
+
+# SAM-2 checkpoint
+SAM2_FILE="$BACKEND_DIR/checkpoints/sam2_hiera_large.pt"
+if [ ! -f "$SAM2_FILE" ]; then
+    echo "⬇️ Downloading SAM-2 checkpoint..."
+    wget -O "$SAM2_FILE" "https://huggingface.co/facebook/sam2-hiera-large/resolve/main/sam2_hiera_large.pt"
+    echo "✅ SAM-2 checkpoint downloaded"
+fi
+
+# Grounding DINO checkpoint
+GDINO_FILE="$BACKEND_DIR/gdino_checkpoints/groundingdino_swint_ogc.pth"
+if [ ! -f "$GDINO_FILE" ]; then
+    echo "⬇️ Downloading Grounding DINO checkpoint..."
+    wget -O "$GDINO_FILE" "https://huggingface.co/pengxian/grounding-dino/resolve/main/groundingdino_swint_ogc.pth"
+    echo "✅ Grounding DINO checkpoint downloaded"
+fi
+
 # Function to check model files
 check_model_files() {
     echo "🔍 Checking model files..."
@@ -213,12 +234,17 @@ setup_repositories() {
     
     # Install GroundingDINO dependencies
     if [ -d "Grounded-SAM-2" ]; then
-        echo "   Installing GroundingDINO dependencies..."
+        echo "   Installing Grounded-SAM-2 dependencies..."
         cd "Grounded-SAM-2"
-        safe_pip_install -e .
+        if [ -f "requirements.txt" ]; then
+            safe_pip_install -r requirements.txt
+            echo "   ✅ Grounded-SAM-2 dependencies installed"
+        else
+            echo "   ⚠️  requirements.txt not found in Grounded-SAM-2"
+        fi
         cd "$PROJECT_ROOT"
-        echo "   ✅ GroundingDINO installed"
     fi
+
     
     echo "✅ Repository setup completed"
 }
@@ -400,11 +426,92 @@ else:
     echo "✅ SAM2 patches applied"
 }
 
+
+# --- Setup GroundingDINO properly ---
+# --- Setup GroundingDINO properly ---
+setup_grounding_dino() {
+    echo "🔄 Setting up GroundingDINO..."
+
+    # Handle different possible folder names
+    if [ -d "$PROJECT_ROOT/Grounded-SAM-2/grounding_dino" ]; then
+        GDINO_DIR="$PROJECT_ROOT/Grounded-SAM-2/grounding_dino"
+    elif [ -d "$PROJECT_ROOT/Grounded-SAM-2/GroundingDINO" ]; then
+        GDINO_DIR="$PROJECT_ROOT/Grounded-SAM-2/GroundingDINO"
+    else
+        echo "❌ GroundingDINO folder not found in $PROJECT_ROOT/Grounded-SAM-2"
+        return 1
+    fi
+
+    echo "   Found GroundingDINO at: $GDINO_DIR"
+
+    # Ensure it is a package
+    if [ ! -f "$GDINO_DIR/__init__.py" ]; then
+        touch "$GDINO_DIR/__init__.py"
+        echo "   ✅ Created __init__.py in $GDINO_DIR"
+    fi
+
+    # Create minimal setup.py if missing
+    if [ ! -f "$GDINO_DIR/setup.py" ]; then
+        echo "   Creating setup.py for GroundingDINO..."
+        cat > "$GDINO_DIR/setup.py" <<'EOF'
+from setuptools import setup, find_packages
+
+setup(
+    name='grounding_dino',
+    version='0.1',
+    packages=find_packages(),
+)
+EOF
+    fi
+
+    # Install with the *venv* Python/pip
+    echo "   Installing GroundingDINO into venv..."
+    if ! $PYTHON_CMD -m pip install -e "$GDINO_DIR"; then
+        echo "❌ Failed to install GroundingDINO"
+        return 1
+    fi
+
+    # Add to PYTHONPATH
+    export PYTHONPATH="$GDINO_DIR:$PYTHONPATH"
+    echo "✅ GroundingDINO installed and PYTHONPATH updated"
+
+    # Quick import test
+    if $PYTHON_CMD -c "import grounding_dino" 2>/dev/null; then
+        echo "   ✅ Import grounding_dino succeeded"
+    else
+        echo "   ❌ Import test failed — check package structure"
+        return 1
+    fi
+}
+
+# --- Check and download checkpoints ---
+download_checkpoints() {
+    echo "⬇️ Checking checkpoints..."
+
+    mkdir -p "$PROJECT_ROOT/checkpoints" "$PROJECT_ROOT/gdino_checkpoints"
+
+    # SAM-2
+    SAM2_FILE="$PROJECT_ROOT/checkpoints/sam2_hiera_large.pt"
+    if [ ! -f "$SAM2_FILE" ]; then
+        echo "⬇️ Downloading SAM-2 checkpoint..."
+        wget -O "$SAM2_FILE" "https://dl.fbaipublicfiles.com/segment_anything/sam2_hiera_large.pt"
+    fi
+
+    # GroundingDINO
+    GDINO_FILE="$PROJECT_ROOT/gdino_checkpoints/groundingdino_swint_ogc.pth"
+    if [ ! -f "$GDINO_FILE" ]; then
+        echo "⬇️ Downloading GroundingDINO checkpoint..."
+        wget -O "$GDINO_FILE" "https://github.com/IDEA-Research/Grounded-Segment-Anything/releases/download/v0.1/groundingdino_swint_ogc.pth"
+    fi
+
+    echo "✅ All checkpoints present"
+}
+
 # Function to apply patches to Grounding DINO ms_deform_attn.py
 apply_grounding_dino_patches() {
     echo "🔧 Applying patches to Grounding DINO..."
     
-    local ms_deform_file="$PROJECT_ROOT/Grounded-SAM-2/grounding_dino/groundingdino/models/GroundingDINO/ms_deform_attn.py"
+    local ms_deform_file="$PROJECT_ROOT/Grounded-SAM-2/GroundingDINO/groundingdino/models/GroundingDINO/ms_deform_attn.py"
     
     if [ ! -f "$ms_deform_file" ]; then
         echo "   ⚠️  Grounding DINO ms_deform_attn.py not found, skipping..."
