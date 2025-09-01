@@ -549,6 +549,7 @@ except:
 "
     
     echo "✅ Grounding DINO patches completed"
+}
 
 # Function to check Redis
 check_redis() {
