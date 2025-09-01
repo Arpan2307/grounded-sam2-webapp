@@ -189,7 +189,7 @@ setup_repositories() {
     # Clone Grounded-SAM-2 if not exists
     if [ ! -d "Grounded-SAM-2" ]; then
         echo "   Cloning Grounded-SAM-2..."
-        git clone https://github.com/IDEA-Research/Grounded-Segment-Anything-2.git Grounded-SAM-2
+        git clone https://github.com/IDEA-Research/Grounded-Segment-Anything.git Grounded-SAM-2
     else
         echo "   ✅ Grounded-SAM-2 already exists"
     fi
@@ -197,7 +197,7 @@ setup_repositories() {
     # Clone segment-anything-2 if not exists
     if [ ! -d "segment-anything-2" ]; then
         echo "   Cloning Segment-Anything-2..."
-        git clone https://github.com/facebookresearch/segment-anything-2.git segment-anything-2
+        git clone https://github.com/facebookresearch/sam2.git segment-anything-2
     else
         echo "   ✅ SAM-2 already exists"
     fi
